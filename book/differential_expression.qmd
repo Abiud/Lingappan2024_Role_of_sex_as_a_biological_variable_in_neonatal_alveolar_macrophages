@@ -1,0 +1,348 @@
+# Differential Expression Analysis HO vs RA
+
+## Introduction
+
+Differential expression analysis is a key step in the analysis of RNA-seq data. It is used to identify genes that are differentially expressed between two or more conditions. This analysis is important because it can help identify genes that are involved in the biological processes that are being studied. In this report, we will use three different methods to perform differential expression analysis: DESeq2, edgeR, and limma. We will then compare the results from these methods to identify genes that are consistently identified as differentially expressed.
+
+```{r setup}
+#| warning: FALSE
+set.seed(42)
+# load necessary packages
+libraries <- c(
+  "DESeq2", "edgeR", "ggplot2", "dplyr", "tximport", "limma", "ggVennDiagram", "cowplot",
+  "openxlsx", "DT", "org.Mm.eg.db", "clusterProfiler", "RColorBrewer", "pheatmap", "ReactomePA", "msigdbr", "tidyr"
+)
+loaded <- lapply(libraries, require, character.only = TRUE)
+
+comparison <- "byExp"
+
+projectDir <- getwd()
+resDir <- file.path(projectDir, "results", comparison)
+plotDir <- file.path(resDir, "plots")
+
+# source all files in the R directory
+invisible(lapply(list.files(file.path(projectDir, "R"), full.names = TRUE), source))
+
+padj.cutoff <- 0.05
+lfc.cutoff <- 0.6
+```
+
+```{r create_directories}
+#| warning: FALSE
+#| echo: FALSE
+#| include: FALSE
+dir.create(file.path(resDir, "tables"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path(resDir, "objects"), showWarnings = FALSE, recursive = TRUE)
+dir.create(plotDir, showWarnings = FALSE, recursive = TRUE)
+```
+
+```{r initialize_datatable}
+#| include: FALSE
+# This is a hack to get the datatables to render in the html inside a tabset
+htmltools::tagList(DT::datatable(cars, extensions = "Buttons", style = "bootstrap4"))
+```
+
+```{r load_tx2gene}
+#| warning: FALSE
+#| echo: false
+tx2gene <- read.table(file.path(projectDir, "tx2gene.tsv"))
+colnames(tx2gene) <- c("TXNAME", "GENEID", "GENESYMBOL")
+```
+
+```{r setMetadata}
+#| warning: FALSE
+ddsDir <- file.path(resDir, "objects", "dds.rds")
+if (!file.exists(ddsDir)) {
+  raw_count <- read.table(file.path(projectDir, "raw_data", "GSE267573_raw_counts.csv"), header = TRUE, row.names = 1, sep = ",")
+  # create a dataframe with a column named Samples with the column names of the raw counts
+  metadata <- data.frame(Sample = colnames(raw_count)) |>
+    dplyr::mutate(
+      Condition = ifelse(grepl("H", Sample), "Oxygen", "Room_Air"),
+      Sex = ifelse(grepl("F", Sample), "Female", "Male"),
+      Condition = factor(Condition, levels = c("Room_Air", "Oxygen")),
+      Sex = factor(Sex, levels = c("Female", "Male"))
+    )
+  rownames(metadata) <- metadata$Sample
+
+  se <- CreateSummarizedExperiment(raw_count, metadata)
+  # Create a DESeqDataSet object
+  dds <- DESeqDataSet(se, design = ~Condition)
+  ddsTxi <- Filterdds(dds, groupSize = 2)
+  dds <- DESeq(ddsTxi)
+  saveRDS(dds, ddsDir)
+}
+dds <- readRDS(ddsDir)
+```
+
+### Heatmap of the sample-to-sample distances
+
+```{r sample_to_sample_heatmap}
+#| warning: FALSE
+#| fig-width: 8
+#| fig-height: 6
+#| echo: false
+sampleDistanceHeatmap(dds, labelColumns = c("Condition", "Sex"))
+```
+
+### PCA plot
+
+```{r pca_plot}
+#| warning: FALSE
+#| fig-width: 8
+#| fig-height: 6
+#| echo: false
+pcaPlot(dds, intgroup = c("Condition", "Sex"))
+```
+
+Voom is a transformation method that is used to transform count data into log-counts per million (logCPM) values. This transformation is used to stabilize the variance of the data, which is important for the downstream analysis when using limma.
+
+### Differential Expression
+
+```{r DESeq2_DE}
+#| warning: FALSE
+dgeDir <- file.path(resDir, "objects", "dge.rds")
+if (!file.exists(dgeDir)) {
+  dgeObj <- GetDGEObject(dds, group = "Condition")
+  saveRDS(dgeObj, dgeDir)
+}
+dgeObj <- readRDS(dgeDir)
+
+deResDir <- file.path(resDir, "objects", "DE.rds")
+if (!file.exists(deResDir)) {
+  DE <- GetDE(
+    dds = dds, dge = dgeObj, comparisonNameDESeq2 = "Condition_Oxygen_vs_Room_Air", comparisonNameDGE = "ConditionOxygen",
+    designDGE = ~Condition, alpha = padj.cutoff, foldChangeThreshold = lfc.cutoff, verbose = FALSE
+  ) 
+  saveRDS(DE, deResDir)
+}
+DE <- readRDS(deResDir)
+```
+
+```{r expression_plot}
+#| warning: FALSE
+#| echo: false
+p <- expressionPlot(dds, genes = c("Xist", "Ddx3y"))
+print(p)
+ggsave(file.path(plotDir, "expression_plot.pdf"), p, width = 8, height = 6)
+```
+
+::: {.callout-note collapse="true"}
+## DESeq2 Pvalue Distribution
+```{r pvalue_distribution}
+#| warning: FALSE
+#| echo: FALSE
+# Histogram of p-value distribution
+pvals <- DE$DESeq2$pvalue
+hist(pvals, breaks = 50, col = "skyblue", border = "white", main = "Histogram of p-values", xlab = "p-value")
+```
+:::
+
+## Results
+
+Different methods for differential expression analysis can yield different results. The following Venn diagrams show the overlap between the significant genes identified by DESeq2, edgeR, and limma.
+
+```{r venn}
+#| warning: FALSE
+#| fig-width: 16
+#| fig-height: 6
+#| echo: false
+v1 <- ggVennDiagram::ggVennDiagram(
+  list(
+    DESeq2 = dplyr::filter(DE$DESeq2, shrunken_sig_exp %in% c("UP", "DOWN")) |> rownames(),
+    edgeR = dplyr::filter(DE$edgeR, sig_exp %in% c("UP", "DOWN")) |> rownames(),
+    limma = dplyr::filter(DE$limma, sig_exp %in% c("UP", "DOWN")) |> rownames()
+  )
+) + ggtitle("DESeq2, edgeR, and limma significant genes")
+
+v2 <- ggVennDiagram::ggVennDiagram(
+  list(
+    DESeq2 = dplyr::filter(DE$DESeq2, shrunken_sig_exp == "UP") |> rownames(),
+    edgeR = dplyr::filter(DE$edgeR, sig_exp == "UP") |> rownames(),
+    limma = dplyr::filter(DE$limma, sig_exp == "UP") |> rownames()
+  )
+) + ggtitle("DESeq2, edgeR, and limma upregulated genes")
+
+v3 <- ggVennDiagram::ggVennDiagram(
+  list(
+    DESeq2 = dplyr::filter(DE$DESeq2, shrunken_sig_exp == "DOWN") |> rownames(),
+    edgeR = dplyr::filter(DE$edgeR, sig_exp == "DOWN") |> rownames(),
+    limma = dplyr::filter(DE$limma, sig_exp == "DOWN") |> rownames()
+  )
+) + ggtitle("DESeq2, edgeR, and limma downregulated genes")
+
+# plot the venn diagrams side by side
+venns <- cowplot::plot_grid(v1, v2, v3, ncol = 3)
+ggsave(file.path(plotDir, "venn_diagrams_methods.pdf"), venns, width = 16, height = 6)
+print(venns)
+```
+
+The following table shows the significant genes identified by each method.
+Download the tables by clicking the buttons above each table.
+
+```{r DE_tables}
+#| warning: false
+#| panel: tabset
+#| output: asis
+#| echo: false
+cat("## DESeq2\n")
+# Create a table for the significant genes identified by each method
+print(getDESeq2Table(DE$DESeq2))
+cat("\n")
+cat("## edgeR\n")
+print(getEdgeRTable(DE$edgeR))
+cat("\n")
+cat("## limma\n")
+print(getLimmaTable(DE$limma))
+```
+
+```{r volcanos}
+#| warning: FALSE
+#| echo: false
+p <- volcanoPlot(
+  DE$DESeq2, fc = "shrunken_log2FoldChange", padj = "padj", sig_exp = "shrunken_sig_exp",
+  title = "DESeq2 Oxygen vs Room Air", maxPvalue = 18, maxLogFC = 3
+)
+print(p)
+ggsave(file.path(plotDir, "DESeq2_volcano_plot.pdf"), p, width = 6, height = 6)
+```
+
+```{r heatmap}
+#| warning: FALSE
+#| fig-width: 14
+#| fig-height: 8
+#| echo: false
+ht1 <- heatmapPlot(
+  dds,
+  DE$DESeq2 |> dplyr::filter(shrunken_sig_exp %in% c("UP", "DOWN")),
+  title = "DESeq2 Oxygen vs Room Air",
+  tx2gene
+) 
+ComplexHeatmap::draw(ht1, auto_adjust = FALSE)
+pdf(file.path(plotDir, "DESeq2_heatmap.pdf"), width = 14, height = 8)
+ComplexHeatmap::draw(ht1, auto_adjust = FALSE)
+dev.off()
+```
+
+## Pathway Analysis
+
+The genes identified as differentially expressed can be used to perform pathway analysis. This analysis can help identify the biological processes that are affected by the treatment. The following table shows the pathways that are enriched among the differentially expressed genes.
+
+[Cluster Profiler - Overview of enrichment analysis](https://yulab-smu.top/biomedical-knowledge-mining-book/enrichment-overview.html)
+
+```{r pathway_analysis}
+#| warning: FALSE
+#| echo: FALSE
+pathwayListGSEDir <- file.path(resDir, "objects", "pathwayListGSE.rds")
+if (file.exists(pathwayListGSEDir)) {
+  pathwaysGSE <- readRDS(pathwayListGSEDir)
+} else {
+  pathwaysGSE <- GetGSEA(DE$DESeq2, statCol = "stat", organism = "mouse", sigExpCol = "shrunken_sig_exp")
+  saveRDS(pathwaysGSE, pathwayListGSEDir)
+} 
+pathwayListOverRepDir <- file.path(resDir, "objects", "pathwayListOverRep.rds")
+if (file.exists(pathwayListOverRepDir)) {
+  pathwaysOverRep <- readRDS(pathwayListOverRepDir)
+} else {
+  pathwaysOverRep <- GetOverRepAnalysis(DE$DESeq2, statCol = "stat", organism = "mouse", sigExpCol = "shrunken_sig_exp")
+  saveRDS(pathwaysOverRep, pathwayListOverRepDir)
+}
+```
+
+```{r pathway_tables}
+#| warning: FALSE
+#| echo: FALSE
+#| output: asis
+#| panel: tabset
+nameMap <- list(gse = "Gene Set Enrichment", overRep = "Over-representation")
+descriptionMap <- list(
+  gse = "Gene Set Enrichment Analysis (GSEA) is a computational method that determines whether an a priori defined set of genes shows statistically significant, concordant differences between two biological states.",
+  overRep = "Over Representation Analysis (ORA) (Boyle et al. 2004) is a widely used approach to determine whether known biological functions or processes are over-represented (= enriched) in an experimentally-derived gene list, e.g. a list of differentially expressed genes (DEGs)."
+)
+cat(paste0("\n## ", nameMap$gse, "\n"))
+cat(descriptionMap$gse, "\n")
+cat("\n All genes as input:\n")
+allGenes <- pathwaysGSE$summary |> dplyr::filter(Input == "all")
+if (nrow(allGenes) == 0) {
+  data <- data.frame()
+} else {
+  data <- table(allGenes$DB) |>
+    as.data.frame() |>
+    tidyr::pivot_wider(names_from = Var1, values_from = Freq)
+}
+print(htmltools::tagList(DT::datatable(data, rownames = FALSE, style = "bootstrap4", options = list(dom = 't'))))
+cat("\n Only Significant genes as input:\n")
+sigGenes <- pathwaysGSE$summary |> dplyr::filter(Input == "sig")
+if (nrow(sigGenes) == 0) {
+  data <- data.frame()
+} else {
+  data <- table(sigGenes$DB) |>
+    as.data.frame() |>
+    tidyr::pivot_wider(names_from = Var1, values_from = Freq)
+}
+print(htmltools::tagList(DT::datatable(data, rownames = FALSE, style = "bootstrap4", options = list(dom = 't'))))
+
+cat(paste0("\n## ", nameMap$overRep, "\n"))
+cat(descriptionMap$overRep, "\n")
+cat("\n Only Significant genes as input:\n")
+if (nrow(pathwaysOverRep$summary) == 0) {
+  data <- data.frame()
+} else {
+  data <- table(pathwaysOverRep$summary$Input, pathwaysOverRep$summary$DB) |>
+    as.data.frame() |>
+    tidyr::pivot_wider(names_from = Var2, values_from = Freq) |>
+    dplyr::rename("Input" = "Var1")
+}
+print(htmltools::tagList(DT::datatable(data, rownames = FALSE, style = "bootstrap4", options = list(dom = 't'))))
+```
+
+```{r pathwayOverRep_barplot}
+#| warning: false
+#| echo: false
+upPathways <- c("nuclear division", "positive regulation of cell cycle process", "myeloid cell differentiation", "leukocyte migration", "DNA Repair", "intrinsic apoptotic signaling pathway", "double-strand break repair", "DNA integrity checkpoint signaling", "cellular response to interferon-beta", "regulation of macrophage activation")
+downPathways <- c(
+  "fatty acid metabolic process", "PPAR signaling pathway - Mus musculus (house mouse)", "regulation of fatty acid metabolic process", "establishment of endothelial barrier", "endothelial cell development", "regulation of fatty acid oxidation", "endothelial cell differentiation"
+)
+upBar <- plotOverRepBar(
+  pathwaysOverRep$summary |> dplyr::filter(Input == "up"), nameCol = "Description", scoreCol = "pvalue", countCol = "Count", filter = upPathways, colors = c("#00806B"), title = "Up by Experiment"
+)
+downBar <- plotOverRepBar(
+  pathwaysOverRep$summary |> dplyr::filter(Input == "down"), nameCol = "Description", scoreCol = "pvalue", countCol = "Count", filter = downPathways, colors = c("#E1AD25"), title = "Down by Experiment"
+)
+upBar
+downBar
+pdf(file.path(plotDir, "pathwayOverRep_barplot.pdf"), width = 8, height = 5)
+print(upBar)
+print(downBar)
+dev.off()
+```
+
+```{r getHomerFiles}
+#| warning: FALSE
+#| echo: FALSE
+SaveHomerList(DE$DESeq2, "SYMBOL", "shrunken_sig_exp", file.path(resDir, "tables"), "Oxygen_vs_RoomAir")
+```
+
+```{r HomerHeatmaps}
+#| warning: false
+#| echo: false
+p <- homerHeatmapPlot(dds, genes = c("Runx2", "Tcf7", "Klf4", "Irf1", "Irf2", "Irf4"), tx2gene = tx2gene, zscore = TRUE)
+pdf(file.path(plotDir, "homerHeatmap.pdf"))
+print(p)
+dev.off()
+```
+
+```{r HomerHeatmaps2}
+#| warning: false
+#| echo: false
+heatmap <- homerHeatmapPlot(dds, tx2gene = tx2gene, genes = c("Runx2", "Tcf7", "Klf4", "Irf1", "Irf2", "Irf4"))
+pdf(file.path(plotDir, "homerHeatmap.pdf"))
+print(heatmap)
+dev.off()
+```
+
+::: {.callout-note collapse="true"}
+## Session information
+```{r sessionInfo}
+sessionInfo()
+```
+:::

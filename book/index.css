@@ -1,0 +1,7 @@
+.dataTables_paginate {
+  display: inline-block !important;
+}
+
+.dataTables_scroll {
+  text-wrap: nowrap;
+}

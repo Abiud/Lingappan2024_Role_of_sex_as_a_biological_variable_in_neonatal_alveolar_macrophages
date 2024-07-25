@@ -1,0 +1,61 @@
+# Preprocessing
+
+```{r setup}
+#| warning: FALSE
+set.seed(42)
+# load necessary packages
+libraries <- c(
+  "DESeq2", "edgeR", "ggplot2", "dplyr", "tximport", "limma", "ggVennDiagram", "cowplot",
+  "openxlsx", "DT", "org.Mm.eg.db", "clusterProfiler", "RColorBrewer", "pheatmap", "ReactomePA", "msigdbr"
+)
+loaded <- lapply(libraries, require, character.only = TRUE)
+
+projectDir <- getwd()
+
+# source all files in the R directory
+invisible(lapply(list.files(file.path(projectDir, "R"), full.names = TRUE), source))
+```
+
+```{r initialize_datatable}
+#| include: FALSE
+# This is a hack to get the datatables to render in the html inside a tabset
+htmltools::tagList(DT::datatable(cars, extensions = "Buttons", style = "bootstrap4"))
+```
+
+## Load Raw Counts
+
+```{r load_raw_counts}
+#| warning: FALSE
+#| error: FALSE
+raw_count <- read.table(file.path(projectDir, "raw_data", "GSE267573_raw_counts.csv"), header = TRUE, row.names = 1, sep = ",")
+# create a dataframe with a column named Samples with the column names of the raw counts
+metadata <- data.frame(Sample = colnames(raw_count)) |>
+  dplyr::mutate(
+    Condition = ifelse(grepl("H", Sample), "Oxygen", "Room_Air"),
+    Sex = ifelse(grepl("F", Sample), "Female", "Male"),
+    Condition = factor(Condition, levels = c("Room_Air", "Oxygen")),
+    Sex = factor(Sex, levels = c("Female", "Male"))
+  )
+rownames(metadata) <- metadata$Sample
+
+# se <- CreateSummarizedExperiment(raw_count, metadata)
+# # Create a DESeqDataSet object
+# dds <- DESeqDataSet(se, design = ~Condition)
+# ddsTxi <- Filterdds(dds, groupSize = 2)
+# dds <- DESeq(ddsTxi)
+```
+
+## Metadata
+
+```{r metadata}
+#| warning: FALSE
+#| error: FALSE
+DT::datatable(metadata, rownames = FALSE, style = "bootstrap4")
+```
+
+::: {.callout-note collapse="true"}
+## Session information
+```{r sessionInfo}
+sessionInfo()
+```
+:::

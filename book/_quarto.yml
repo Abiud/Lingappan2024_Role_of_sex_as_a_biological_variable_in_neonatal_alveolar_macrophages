@@ -1,0 +1,35 @@
+project:
+  type: book
+
+book:
+  title: "Impact of neonatal hyperoxia exposure on lung myeloid cells"
+  author: "Abiud Cantu"
+  date: today
+  favicon: favicon.ico
+  description: RNA-seq analysis of alveolar macrophages
+  sidebar:
+    logo: LingappanLab.png
+    search: true
+  image: LingappanLab.png
+
+  chapters:
+    - index.qmd
+    - differential_expression.qmd
+    - differential_expression_byExpSex.qmd
+    - differential_expression_RA_bySex.qmd
+    - summary.qmd
+
+format:
+  html:
+    css: index.css
+    code-tools: true
+    code-fold: true
+    theme:
+      light: default
+
+execute:
+  warning: false
+
+knitr:
+  opts_knit:
+    root.dir: "/home/Impact of neonatal hyperoxia exposure on lung myeloid cells" # Path to the Project Directory not the book directory
