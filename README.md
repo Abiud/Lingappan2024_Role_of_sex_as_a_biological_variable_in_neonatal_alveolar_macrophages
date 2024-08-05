@@ -1,6 +1,6 @@
 <a target="_blank" href="https://www.lingappanlab.com/" rel="noopener noreferrer"><img align="right" alt="Lingappan Lab logo" src="https://www.lingappanlab.com/_next/static/media/logo.80977683.svg" width="128"/></a>
 
-# Impact of neonatal hyperoxia exposure on lung myeloid cells
+# Impact of neonatal hyperoxia exposure on lung myeloid cells [PMID: 39098263](https://pubmed.ncbi.nlm.nih.gov/39098263)
 
 The book folder contains quarto files with a step by step analysis.
 The R folder conatins all of the functions used on each step.
